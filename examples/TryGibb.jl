@@ -2,7 +2,7 @@ using Bridge
 using Plots
 import LinearAlgebra.dot
 using Distributions
-#import Bridge.sample
+
 
 struct OU <: Bridge.ContinuousTimeProcess{Float64}
     μ::Float64
@@ -31,43 +31,44 @@ function Bridge.sample(tt,P::GBBCies)
     L=P.L
     u=P.u
     v=P.v
-    W = BBridgeCies(tt, L).yy .+ (v - u)/(tt[end] - tt[1]).*tt .+ u
+    W = BBridgeCies(tt, L).yy #.+ (v - u)/(tt[end] - tt[1]).*(tt .- tt[1])
     W = SamplePath(tt,W)
 end
-
-
-Bridge.b(s, x, P::GBBCies) = (P.v - P.u)
-Bridge.σ(s, x, P::GBBCies) = 1.0
 
 function interpolate(x1, y1, x2, y2, x)
     y = y1 .+ (y2 .- y1)/(x2 .- x1).*(x .- x1)
 end
 
-
-
-function Λ(x)
-    return max(0.0, 1.0 - 2abs(x - 0.5))
+function Λ(x,t)
+    return max(0.0, t - 2abs(x - t/2))
 end
-function Λ(t, l, k)
-    x = mod(t, 1)
-    Λ((x)*2^(l-1) - k + 1)
+
+function Λ(t, l, k, T)
+    x = mod(t, T)   #ok
+    Λ((x)*(2)^(l-1) -T*(k - 1),T)
 end
-function cies(t, Z, L)
+
+function cies(t, Z, L, T)
     x = 0.0
     i = 1
     for l in 1:L
         for k in 1:2^(l-1)
-            x += 2^(-l/2 - 0.5)*Z[i]*Λ(t, l, k)
+            x += 2^(-l/2 - 0.5)*Z[i]*Λ(t, l, k, T)
             i += 1
         end
     end
     x
 end
+
 function BBridgeCies(tt, L)
+    t = tt .- tt[1]
+    T = t[end]
     Z = randn(2^(L) - 1)
-    Z = [cies(ti, Z, L) for ti in tt]
+    Z = [cies(ti, Z, L, T) for ti in t]
     Z = SamplePath(tt, Z)
 end
+
+
 function Bridge.sample(tt,P::GBBCies)
     L=P.L
     u=P.u
@@ -87,13 +88,7 @@ plot(X) #check
 index = [1,101,201]
 X_obs = SamplePath(X.tt[index], X.yy[index])
 plot(X_obs;seriestype=:scatter) #check
-#initialize Z
-Z=SamplePath(t,zeros(length(t)))
-#linear interpolation
-for j in 1:length(index)-1
-            Z.yy[index[j]:index[j+1]] = interpolate(X_obs.tt[j],X_obs.yy[j],X_obs.tt[j+1],X_obs.yy[j+1],t[index[j]:index[j+1]])
-end
-plot(Z) #check
+
 μstart= 5
 function GS(index, X_obs, μstart, t, iterations, ρ, σ0,μ0)
     μ = μstart
@@ -135,4 +130,4 @@ function GS(index, X_obs, μstart, t, iterations, ρ, σ0,μ0)
 end
 
 
-GS(index, X_obs, 5.0,t, 10, 0.4,.1,4.0)
+A =GS(index, X_obs, 5.0,t, 10, 0.4,.1,4.0)
