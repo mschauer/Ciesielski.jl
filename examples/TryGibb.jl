@@ -10,33 +10,22 @@ struct OU <: Bridge.ContinuousTimeProcess{Float64}
 end
 Bridge.b(s, x, P::OU) = P.α*(P.μ - x)
 Bridge.σ(s, x, P::OU) = 1.0
-function Bridge.sample(tt,P::OU)
-    dt = tt[2:end]  .-  tt[1:end-1]
-    x = zeros(1,length(tt))
-    for i = 1:length(t)-1
-        x[i+1] = x[i]+P.α*(P.μ-x[i])*dt[i]+sqrt(dt[i])*randn();
-    end
-    x=vec(x)
-    X = Bridge.SamplePath(tt,x)
-    return X
-end
 
-#suppose for the moment that t_0= 0 t_1 = 1
 struct GBBCies <: Bridge.ContinuousTimeProcess{Float64}
     u::Float64
     v::Float64
     L::Int16
 end
 function Bridge.sample(tt,P::GBBCies)
-    L=P.L
-    u=P.u
-    v=P.v
+    L = P.L
+    u = P.u
+    v = P.v
     W = BBridgeCies(tt, L).yy #.+ (v - u)/(tt[end] - tt[1]).*(tt .- tt[1])
     W = SamplePath(tt,W)
 end
 
 function interpolate(x1, y1, x2, y2, x)
-    y = y1 .+ (y2 .- y1)/(x2 .- x1).*(x .- x1)
+    return ( y1 .+ (y2 .- y1)/(x2 .- x1).*(x .- x1))
 end
 
 function Λ(x,t)
@@ -70,9 +59,9 @@ end
 
 
 function Bridge.sample(tt,P::GBBCies)
-    L=P.L
-    u=P.u
-    v=P.v
+    L = P.L
+    u = P.u
+    v = P.v
     W = BBridgeCies(tt, L).yy .+ (v - u)/(tt[end] - tt[1]).*tt .+ u
     W = SamplePath(tt,W)
 end
@@ -80,34 +69,35 @@ end
 #############################################
 ################ APPLICATION ################
 #############################################
-dx=0.01
-t = 0:dx:2
-μtrue = 10.0
-X = Bridge.sample(t,OU(μtrue,1.0))
+dx = 0.001
+t = 0:dx:1
+μtrue = 4.0
+X = solve(EulerMaruyama(), 0.0, sample(t, Wiener()), OU(μtrue, 1.0))
 plot(X) #check
-index = [1,101,201]
+index = [1, 400, 600, 1001]
 X_obs = SamplePath(X.tt[index], X.yy[index])
-plot(X_obs;seriestype=:scatter) #check
+plot(X_obs; seriestype=:scatter) #check
 
-μstart= 5
+μstart= 5.0
 function GS(index, X_obs, μstart, t, iterations, ρ, σ0,μ0)
+    t = t[1:index[end]]
     μ = μstart
     A = [μ]
     #inizialize Z with linear interpolation
-    Z=SamplePath(t,zeros(length(t)))
-    for j in 1:length(index)-1
-                Z.yy[index[j]:index[j+1]] = interpolate(X_obs.tt[j],X_obs.yy[j],X_obs.tt[j+1],X_obs.yy[j+1],t[index[j]:index[j+1]])
+    Z = SamplePath(t,zeros(length(t)))
+    for j in 1:length(index) - 1
+                Z.yy[index[j]:index[j + 1]] = interpolate(X_obs.tt[j], X_obs.yy[j], X_obs.tt[j + 1], X_obs.yy[j + 1], t[index[j]:index[j + 1]])
     end
-    lgir = repeat([-Inf], length(index)-1)
+    lgir = fill(-Inf, length(index) - 1)
     for i in 1:iterations
-        for j in length(index)-1
+        for j in length(index) - 1
             # first segment
             u = X_obs.yy[j]
             v = X_obs.yy[j+1]
             ii = index[j]:index[j+1]
             tt = t[ii]
-            Z1 = sample(tt, GBBCies(u,v,10)) #updating path
-            z° = sqrt(ρ)*Z.yy[ii] + sqrt(1-ρ)*Z1.yy #preconditioned Crank-Nicolson
+            Z1 = sample(tt, GBBCies(u, v, 10)) #updating path
+            z° = sqrt(ρ)*Z.yy[ii] + sqrt(1 - ρ)*Z1.yy #preconditioned Crank-Nicolson
             Z° = SamplePath(tt, z°)
             lgir° = Bridge.girsanov(Z°, OU(μ,1.0), Wiener())
             A1 = exp(lgir° - lgir[j])
@@ -118,16 +108,18 @@ function GS(index, X_obs, μstart, t, iterations, ρ, σ0,μ0)
             end
 
         #Step 2
-        T=t[end]
+        T = t[end]
         σpost= 1 / (T + (1\σ0))
-        Δt = t[2:end].-t[1:end-1]
-        integ = dot(Z.yy[1:end-1],Δt) # dot operator dt and Z[1:end-1]
-        μpost= (X_obs.yy[end] + integ + μ0/σ0)*σpost
-        μ = rand(Normal(μpost,σpost)) #updating parameter
+        Δt = diff(t)
+        μpost = (X_obs.yy[end] + dot(Z.yy[1:end-1], Δt) + μ0/σ0)*σpost
+        μ = rand(Normal(μpost, σpost)) #updating parameter
         push!(A,μ)
     end
     A
 end
 
-
-A =GS(index, X_obs, 5.0,t, 10, 0.4,.1,4.0)
+μstart = 1.0
+iterations = 1000
+A = GS(index, X_obs, μstart ,t , iterations, 0.7, 10.0, μstart)
+plot(1:iterations + 1, A)
+hline!([μtrue])
